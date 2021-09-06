@@ -209,7 +209,7 @@ void zfree(void *ptr) {
 #endif
 }
 
-char *zstrdup(const char *s) {
+char *zstrdup(const char *s) {  // memcpy 复制 s 所指内容的前 l 个字节到 p 所指的内存上
     size_t l = strlen(s)+1;
     char *p = zmalloc(l);
 

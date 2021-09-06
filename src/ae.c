@@ -80,7 +80,7 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
     for (i = 0; i < setsize; i++)
-        eventLoop->events[i].mask = AE_NONE;
+        eventLoop->events[i].mask = AE_NONE;    // 初始化事件循环为空
     return eventLoop;
 
 err:
@@ -266,21 +266,13 @@ static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
     return nearest;
 }
 
-/* Process time events */
+// 时间事件处理函数
 static int processTimeEvents(aeEventLoop *eventLoop) {
     int processed = 0;
     aeTimeEvent *te;
     long long maxId;
     time_t now = time(NULL);
-
-    /* If the system clock is moved to the future, and then set back to the
-     * right value, time events may be delayed in a random way. Often this
-     * means that scheduled operations will not be performed soon enough.
-     *
-     * Here we try to detect system clock skews, and force all the time
-     * events to be processed ASAP when this happens: the idea is that
-     * processing events earlier is less dangerous than delaying them
-     * indefinitely, and practice suggests it is. */
+    // 如果当前事件时间还未到达，将下次执行，可能会比预计时间延迟
     if (now < eventLoop->lastTime) {
         te = eventLoop->timeEventHead;
         while(te) {
@@ -355,11 +347,22 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * the events that's possible to process without to wait are processed.
  *
  * The function returns the number of events processed. */
+/*
+  aeProcessEvents 函数处理待处理的事件，先处理待时间事件，再处理待处理的文件事件。返回处理的事件数
+
+  flags 事件类型:
+    0: 不执行任何操作，直接返回
+    AE_ALL_EVENTS:        处理时间和文件事件
+    AE_FILE_EVENTS:       只处理文件事件
+    AE_TIME_EVENTS:       只处理时间事件
+    AE_DONT_WAIT:         尽快返回
+    AE_CALL_AFTER_SLEEP:  执行休眠后方法， 处理无需等待即可处理的事件
+*/
 int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
 
-    /* Nothing to do? return ASAP */
+    // 非 AE_TIME_EVENTS 和 AE_FILE_EVENTS 事件，返回
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
 
     /* Note that we want call select() even if there are no
@@ -464,11 +467,10 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             processed++;
         }
     }
-    /* Check time events */
-    if (flags & AE_TIME_EVENTS)
+    if (flags & AE_TIME_EVENTS) // 处理定时任务
         processed += processTimeEvents(eventLoop);
 
-    return processed; /* return the number of processed file/time events */
+    return processed;
 }
 
 /* Wait for milliseconds until the given file descriptor becomes
@@ -493,6 +495,7 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
+// aeMain 是主要的事件处理函数，只处理文件事件、定时事件、休眠后执行 事件
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {

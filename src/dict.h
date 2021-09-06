@@ -44,15 +44,16 @@
 /* Unused arguments generate annoying warnings... */
 #define DICT_NOTUSED(V) ((void) V)
 
+// dictEntry 表示 redis 中每个键值对
 typedef struct dictEntry {
-    void *key;
-    union {
+    void *key;          // 键
+    union {             // 值
         void *val;
         uint64_t u64;
         int64_t s64;
         double d;
     } v;
-    struct dictEntry *next;
+    struct dictEntry *next;  // 指向下一个键
 } dictEntry;
 
 typedef struct dictType {
@@ -64,8 +65,7 @@ typedef struct dictType {
     void (*valDestructor)(void *privdata, void *obj);
 } dictType;
 
-/* This is our hash table structure. Every dictionary has two of this as we
- * implement incremental rehashing, for the old to the new table. */
+// 哈希表结构，每一个字段有两个该实例，在 rehash 的时候用于拷贝
 typedef struct dictht {
     dictEntry **table;
     unsigned long size;
@@ -76,9 +76,9 @@ typedef struct dictht {
 typedef struct dict {
     dictType *type;
     void *privdata;
-    dictht ht[2];
-    long rehashidx; /* rehashing not in progress if rehashidx == -1 */
-    unsigned long iterators; /* number of iterators currently running */
+    dictht ht[2];             // 两个字典实例，在进行 rehash 的时候用于拷贝
+    long rehashidx;           // 是否进行 rehash，-1 表示不进行
+    unsigned long iterators;   // 当前运行的迭代器数量
 } dict;
 
 /* If safe is set to 1 this is a safe iterator, that means, you can call

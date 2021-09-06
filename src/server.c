@@ -1544,7 +1544,7 @@ void initServerConfig(void) {
     pthread_mutex_init(&server.unixtime_mutex,NULL);
 
     updateCachedTime(1);
-    getRandomHexChars(server.runid,CONFIG_RUN_ID_SIZE);
+    getRandomHexChars(server.runid,CONFIG_RUN_ID_SIZE);  // 生成一个 CONFIG_RUN_ID_SIZE 位的运行 id(char)，用于区分 redis 实例
     server.runid[CONFIG_RUN_ID_SIZE] = '\0';
     changeReplicationId();
     clearReplicationId2();
@@ -2036,7 +2036,7 @@ void resetServerStats(void) {
 void initServer(void) {
     int j;
 
-    signal(SIGHUP, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);   // 设置信号处理函数, SIGHUP 和 SIGPIPE 调用 SIG_IGN 函数处理
     signal(SIGPIPE, SIG_IGN);
     setupSignalHandlers();
 
@@ -2049,22 +2049,24 @@ void initServer(void) {
     server.pid = getpid();
     server.current_client = NULL;
     server.fixed_time_expire = 0;
-    server.clients = listCreate();
+    server.clients = listCreate();               // 创建一个链表用于存放活跃的客户端
     server.clients_index = raxNew();
-    server.clients_to_close = listCreate();
-    server.slaves = listCreate();
-    server.monitors = listCreate();
-    server.clients_pending_write = listCreate();
+    server.clients_to_close = listCreate();       // 创建一个链表用于存放异步关闭的客户端
+    server.slaves = listCreate();                 // 创建一个链表用于存放 slave
+    server.monitors = listCreate();               // 创建一个链表用于存放监控服务
+    server.clients_pending_write = listCreate();  // 存放等待操作的客户端
+
     server.slaveseldb = -1; /* Force to emit the first SELECT command. */
     server.unblocked_clients = listCreate();
     server.ready_keys = listCreate();
     server.clients_waiting_acks = listCreate();
     server.get_ack_from_slaves = 0;
-    server.clients_paused = 0;
+
+    server.clients_paused = 0;           // 当前操作的客户端状态
     server.system_memory_size = zmalloc_get_memory_size();
 
-    createSharedObjects();
-    adjustOpenFilesLimit();
+    createSharedObjects();               // 初始化共享对象
+    adjustOpenFilesLimit();              // 设置合理的最大打开文件数量，
     server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
     if (server.el == NULL) {
         serverLog(LL_WARNING,
@@ -2092,13 +2094,13 @@ void initServer(void) {
     }
 
     /* Abort if there are no listening sockets at all. */
-    if (server.ipfd_count == 0 && server.sofd < 0) {
+    if (server.ipfd_count == 0 && server.sofd < 0) {// 如果 TCP socket 和 unix socket 监听器均未发现，退出
         serverLog(LL_WARNING, "Configured to not listen anywhere, exiting.");
         exit(1);
     }
 
     /* Create the Redis databases, and initialize other internal state. */
-    for (j = 0; j < server.dbnum; j++) {
+    for (j = 0; j < server.dbnum; j++) {      // 初始化数据库
         server.db[j].dict = dictCreate(&dbDictType,NULL);
         server.db[j].expires = dictCreate(&keyptrDictType,NULL);
         server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL);
@@ -3903,8 +3905,8 @@ void createPidFile(void) {
 void daemonize(void) {
     int fd;
 
-    if (fork() != 0) exit(0); /* parent exits */
-    setsid(); /* create a new session */
+    if (fork() != 0) exit(0);  // fork 创建一个新的进程，创建正常会返回一个非 0 的子进程号，同时父进程正常退出
+    setsid();                  // 此处父进程已经退出， 子进程调用 setsid 创建一个新的回话
 
     /* Every output goes to /dev/null. If Redis is daemonized but
      * the 'logfile' is set to 'stdout' in the configuration file
@@ -4253,11 +4255,11 @@ int main(int argc, char **argv) {
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
     spt_init(argc, argv);
 #endif
-    setlocale(LC_COLLATE,"");
+    setlocale(LC_COLLATE,"");                         // 内置函数，设置本地环境
     tzset(); /* Populates 'timezone' global. */
-    zmalloc_set_oom_handler(redisOutOfMemoryHandler);
-    srand(time(NULL)^getpid());
-    gettimeofday(&tv,NULL);
+    zmalloc_set_oom_handler(redisOutOfMemoryHandler); // 设置内存 oom 处理函数
+    srand(time(NULL)^getpid());                       // 设置随机种子，time(NULL) 返回从 1900-01-01 到现在时间的秒数，getpid 为内置函数，用来获取当前进程识别码
+    gettimeofday(&tv,NULL);                           // 获取当前时间戳
 
     char hashseed[16];
     getRandomHexChars(hashseed,sizeof(hashseed));
@@ -4284,12 +4286,12 @@ int main(int argc, char **argv) {
     /* Check if we need to start in redis-check-rdb/aof mode. We just execute
      * the program main. However the program is part of the Redis executable
      * so that we can easily execute an RDB check on loading errors. */
-    if (strstr(argv[0],"redis-check-rdb") != NULL)
+    if (strstr(argv[0],"redis-check-rdb") != NULL)        // 启动命令为 redis-check-rdb，校验 rdb 文件，校验完后进程退出
         redis_check_rdb_main(argc,argv,NULL);
-    else if (strstr(argv[0],"redis-check-aof") != NULL)
+    else if (strstr(argv[0],"redis-check-aof") != NULL)   // 启动命令为 redis-check-rdb，校验 aof 文件，校验完后进程退出
         redis_check_aof_main(argc,argv);
 
-    if (argc >= 2) {
+    if (argc >= 2) {  // 使用自定义配置文件启动
         j = 1; /* First option to parse in argv[] */
         sds options = sdsempty();
         char *configfile = NULL;
@@ -4370,21 +4372,21 @@ int main(int argc, char **argv) {
         serverLog(LL_WARNING, "Configuration loaded");
     }
 
-    server.supervised = redisIsSupervised(server.supervised_mode);
-    int background = server.daemonize && !server.supervised;
+    server.supervised = redisIsSupervised(server.supervised_mode);  // 默认为非后台进程
+    int background = server.daemonize && !server.supervised;         // 如果配置文件设置了 daemonize ，调用 daemonize 以守护进程方式启动
     if (background) daemonize();
 
-    initServer();
-    if (background || server.pidfile) createPidFile();
-    redisSetProcTitle(argv[0]);
-    redisAsciiArt();
-    checkTcpBacklogSettings();
+    initServer();       // 初始化服务
+    if (background || server.pidfile) createPidFile();  // 创建 pid 文件
+    redisSetProcTitle(argv[0]);                         // 输出日志
+    redisAsciiArt();                                    // 输出运行日志
+    checkTcpBacklogSettings();  // 校验 tcp 设置，linux 下读取 /proc/sys/net/core/somaxconn (tcp 端口最大监听队列长度，默认为 128) 文件内容，如果该值小于配置设置的 tcp-backlog 参数，输出告警日志
+                                // 在该并发场景下，如果 somaxconn 较小，会使得 tcp 监听队列较短，导致超过的客户端处于连接中状态，使得客户端连接缓慢
 
-    if (!server.sentinel_mode) {
-        /* Things not needed when running in Sentinel mode. */
+    if (!server.sentinel_mode) {    // 非哨兵模式
         serverLog(LL_WARNING,"Server initialized");
     #ifdef __linux__
-        linuxMemoryWarnings();
+        linuxMemoryWarnings();      // linux 下检查可用内存
     #if defined (__arm64__)
         int ret;
         if ((ret = linuxMadvFreeForkBugCheck())) {
@@ -4402,9 +4404,10 @@ int main(int argc, char **argv) {
         }
     #endif /* __arm64__ */
     #endif /* __linux__ */
-        moduleLoadFromQueue();
-        InitServerLast();
-        loadDataFromDisk();
+
+        moduleLoadFromQueue();          // 根据配置文件 loadmodule 指令动态加载模块，加在失败服务 panic，不支持动态加载
+        InitServerLast();               // 需要最后初始化的操作
+        loadDataFromDisk();             // 从磁盘加载 aof 或 rdb 文件内容到内存
         if (server.cluster_enabled) {
             if (verifyClusterConfigWithData() == C_ERR) {
                 serverLog(LL_WARNING,
@@ -4423,14 +4426,14 @@ int main(int argc, char **argv) {
     }
 
     /* Warning the user about suspicious maxmemory setting. */
-    if (server.maxmemory > 0 && server.maxmemory < 1024*1024) {
+    if (server.maxmemory > 0 && server.maxmemory < 1024*1024) { // 内存小于 1MB 时告警
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
 
     aeSetBeforeSleepProc(server.el,beforeSleep);
     aeSetAfterSleepProc(server.el,afterSleep);
-    aeMain(server.el);
-    aeDeleteEventLoop(server.el);
+    aeMain(server.el);                // 运行事件循环，aeMain 是一个 while 循环，结束调价为 server.el.stop 不为 0
+    aeDeleteEventLoop(server.el);     // 事件循环结束，释放相关资源
     return 0;
 }
 

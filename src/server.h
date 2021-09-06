@@ -643,9 +643,7 @@ typedef struct clientReplyBlock {
     char buf[];
 } clientReplyBlock;
 
-/* Redis database representation. There are multiple databases identified
- * by integers from 0 (the default database) up to the max configured
- * database. The database number is the 'id' field in the structure. */
+// redisDb 是一个数据库实例，每个 redis 有多个数据库实例，id 字段为数据库序号，从 0 开始，
 typedef struct redisDb {
     dict *dict;                 /* The keyspace for this DB */
     dict *expires;              /* Timeout of keys with a timeout set */
@@ -653,7 +651,7 @@ typedef struct redisDb {
     dict *ready_keys;           /* Blocked keys that received a PUSH */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
     int id;                     /* Database ID */
-    long long avg_ttl;          /* Average TTL, just for stats */
+    long long avg_ttl;          // 平均 ttl， 仅用于统计，64 位整型
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 
