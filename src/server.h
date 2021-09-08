@@ -593,34 +593,32 @@ typedef struct RedisModuleDigest {
     memset(mdvar.x,0,sizeof(mdvar.x)); \
 } while(0);
 
-/* Objects encoding. Some kind of objects like Strings and Hashes can be
- * internally represented in multiple ways. The 'encoding' field of the object
- * is set to one of this fields for this object. */
-#define OBJ_ENCODING_RAW 0     /* Raw representation */
-#define OBJ_ENCODING_INT 1     /* Encoded as integer */
-#define OBJ_ENCODING_HT 2      /* Encoded as hash table */
-#define OBJ_ENCODING_ZIPMAP 3  /* Encoded as zipmap */
-#define OBJ_ENCODING_LINKEDLIST 4 /* No longer used: old list encoding. */
-#define OBJ_ENCODING_ZIPLIST 5 /* Encoded as ziplist */
-#define OBJ_ENCODING_INTSET 6  /* Encoded as intset */
-#define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */
-#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */
-#define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of ziplists */
-#define OBJ_ENCODING_STREAM 10 /* Encoded as a radix tree of listpacks */
+// 对象编码，对象类型在内部的表示，同一个对象在内部不同时候可能有不同表示
+#define OBJ_ENCODING_RAW 0          // 原始表示
+#define OBJ_ENCODING_INT 1          // 整数
+#define OBJ_ENCODING_HT 2           // 哈希表
+#define OBJ_ENCODING_ZIPMAP 3       // 压缩哈希表
+#define OBJ_ENCODING_LINKEDLIST 4   // 不再被使用
+#define OBJ_ENCODING_ZIPLIST 5      // 压缩列表
+#define OBJ_ENCODING_INTSET 6       // 整数集合
+#define OBJ_ENCODING_SKIPLIST 7     // 跳表
+#define OBJ_ENCODING_EMBSTR 8       // 简单动态字符串
+#define OBJ_ENCODING_QUICKLIST 9    // 快速链表
+#define OBJ_ENCODING_STREAM 10      // 字典树
 
 #define LRU_BITS 24
 #define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* Max value of obj->lru */
 #define LRU_CLOCK_RESOLUTION 1000 /* LRU clock resolution in ms */
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
+
+// redisObject 表示 redis 的 value 实例
 typedef struct redisObject {
-    unsigned type:4;
-    unsigned encoding:4;
-    unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
-                            * LFU data (least significant 8 bits frequency
-                            * and most significant 16 bits access time). */
-    int refcount;
-    void *ptr;
+    unsigned type:4;        // value 类型，展示给用户的类型，OBJ_STRING、OBJ_LIST、OBJ_SET、OBJ_ZSET、OBJ_HASH
+    unsigned encoding:4;    // 编码类型，底层数据类型，以 OBJ_ENCODING_ 开头定义的类型
+    unsigned lru:LRU_BITS;  // 缓存淘汰使用，LRU 时为相对于全局 lru 的时间，LFU 时低 8 位为使用频率，高 16 位为访问时间
+    int refcount;           // 引用计数
+    void *ptr;              // 指针，指向具体的值
 } robj;
 
 /* Macro used to initialize a Redis object allocated on the stack.
@@ -645,12 +643,12 @@ typedef struct clientReplyBlock {
 
 // redisDb 是一个数据库实例，每个 redis 有多个数据库实例，id 字段为数据库序号，从 0 开始，
 typedef struct redisDb {
-    dict *dict;                 /* The keyspace for this DB */
-    dict *expires;              /* Timeout of keys with a timeout set */
-    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
-    dict *ready_keys;           /* Blocked keys that received a PUSH */
-    dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
-    int id;                     /* Database ID */
+    dict *dict;                 /* 存储所有键值对 */
+    dict *expires;              /* 设置了过期时间的健 */
+    dict *blocking_keys;        /* 当客户端获取 key 时，如果找不到，会阻塞客户端，同时将 key 放入该字典 */
+    dict *ready_keys;           /* 当执行 push 命令时，如果 key 在 blocking_keys 中，会将 key 放入该字典，使得后续便于响应客户端 */
+    dict *watched_keys;         /* 监控的健，执行事务时使用到，执行事务时如果 key 在该列表中表示该 key 可能为脏读 */
+    int id;                     /* 数据库序号，默认为 0～16 */
     long long avg_ttl;          // 平均 ttl， 仅用于统计，64 位整型
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
@@ -1309,19 +1307,17 @@ typedef struct pubsubPattern {
 
 typedef void redisCommandProc(client *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
+
+// redis 命令结构
 struct redisCommand {
-    char *name;
-    redisCommandProc *proc;
-    int arity;
-    char *sflags; /* Flags as string representation, one char per flag. */
-    int flags;    /* The actual flags, obtained from the 'sflags' field. */
-    /* Use a function to determine keys arguments in a command line.
-     * Used for Redis Cluster redirect. */
-    redisGetKeysProc *getkeys_proc;
-    /* What keys should be loaded in background when calling this command? */
-    int firstkey; /* The first argument that's a key (0 = no keys) */
-    int lastkey;  /* The last argument that's a key */
-    int keystep;  /* The step between first and last key */
+    char *name;                     // 命令名称，get、set...
+    redisCommandProc *proc;         // 命令处理函数
+    int arity;                      // 命令参数个数，用于校验
+    char *sflags;                   // 命令操作类型，读/写 等，每个 flag 用字符串表示 */
+    int flags;                      // 实际 flag，命令执行时从 sflags 解析生成
+    redisGetKeysProc *getkeys_proc; // 确定命令行参数，在集群模式重定向时使用
+    int firstkey;                   // key 的第一个参数，0 表示没有参数
+    int keystep;                    // 第一个 key 到最后一个 key 中间的参数个数 
     long long microseconds, calls;
 };
 

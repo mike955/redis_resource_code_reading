@@ -478,12 +478,12 @@ dictEntry *dictFind(dict *d, const void *key)
     dictEntry *he;
     uint64_t h, idx, table;
 
-    if (d->ht[0].used + d->ht[1].used == 0) return NULL; /* dict is empty */
-    if (dictIsRehashing(d)) _dictRehashStep(d);
-    h = dictHashKey(d, key);
+    if (d->ht[0].used + d->ht[1].used == 0) return NULL; // 两个字典均为空，值不存在
+    if (dictIsRehashing(d)) _dictRehashStep(d);          // 判断是否在进行 rehash
+    h = dictHashKey(d, key);                             // 根据字典设置爹哈希函数计算 key 在字典中的哈希值
     for (table = 0; table <= 1; table++) {
-        idx = h & d->ht[table].sizemask;
-        he = d->ht[table].table[idx];
+        idx = h & d->ht[table].sizemask;                 // 根据哈希值和掩码值计算 key 索引
+        he = d->ht[table].table[idx];                    // 根据索引值查找 key
         while(he) {
             if (key==he->key || dictCompareKeys(d, key, he->key))
                 return he;

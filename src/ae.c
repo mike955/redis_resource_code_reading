@@ -133,6 +133,15 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+/* 创建一个文件事件，当前函数主要是处理网络请求，实现方式是多路复用
+   redis 封装并提供了四种不同的多路复用，分别是：evport、epoll、kqueue、select，redis 在
+   创建多路复用时没有区分，而是调用的了同一的 aeApiAddEvent 方法，四种多路复用均实现了该方法，
+   其实现分别在 ae_epoll.c、ae_evport.c、ae_kqueue.c、ae_select.c 文件中，实现时由于每
+   种不同的方式调用的底层函数参数不同，redis 的处理方式是在事件循环对象 aeEventLoop 中提供了
+   一个名为 apidata 的参数来让各个实现根据需要进行读取。
+   redis 在 ae.c 文件头部根据宏定义选择不同类型的多路复用，优先级为：
+    evport -> epoll -> kqueue -> select
+*/
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
 {
@@ -140,15 +149,15 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         errno = ERANGE;
         return AE_ERR;
     }
-    aeFileEvent *fe = &eventLoop->events[fd];
+    aeFileEvent *fe = &eventLoop->events[fd];       // 根据事件 fd 获取事件对象
 
-    if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+    if (aeApiAddEvent(eventLoop, fd, mask) == -1)   // 创建多路复用，并将事件放入
         return AE_ERR;
     fe->mask |= mask;
-    if (mask & AE_READABLE) fe->rfileProc = proc;
+    if (mask & AE_READABLE) fe->rfileProc = proc;   // 添加事件读写处理方法，当事件被触发时，调用对应的读写函数进行处理
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
-    fe->clientData = clientData;
-    if (fd > eventLoop->maxfd)
+    fe->clientData = clientData;                    // 客户端
+    if (fd > eventLoop->maxfd)                      // 将事件放入事件循环
         eventLoop->maxfd = fd;
     return AE_OK;
 }
@@ -495,7 +504,7 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-// aeMain 是主要的事件处理函数，只处理文件事件、定时事件、休眠后执行 事件
+// aeMain 是主要的事件处理函数，只处理文件事件、定时事件，同时在每次进入事件循环前会执行 beforesleep 函数，用于处理相关工作
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {

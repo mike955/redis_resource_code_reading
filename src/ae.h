@@ -67,45 +67,45 @@ typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *client
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
-/* File event structure */
+// 文件事件对象
 typedef struct aeFileEvent {
-    int mask; /* one of AE_(READABLE|WRITABLE|BARRIER) */
-    aeFileProc *rfileProc;
-    aeFileProc *wfileProc;
-    void *clientData;
+    int mask;               // 事件属性， AE_(READABLE|WRITABLE|BARRIER) 三者之一
+    aeFileProc *rfileProc;  // 读操作处理函数
+    aeFileProc *wfileProc;  // 写操作处理函数
+    void *clientData;       // 客户端数据
 } aeFileEvent;
 
-/* Time event structure */
+// 时间事件对象
 typedef struct aeTimeEvent {
     long long id;                         // 事件标识符
     long when_sec;                        // 当前时间，秒
     long when_ms;                         // 当前时间，毫秒
-    aeTimeProc *timeProc;
-    aeEventFinalizerProc *finalizerProc;
-    void *clientData;
-    struct aeTimeEvent *prev;
-    struct aeTimeEvent *next;
+    aeTimeProc *timeProc;                 // 事件处理函数
+    aeEventFinalizerProc *finalizerProc;  // 最后处理函数
+    void *clientData;                     // 最后处理函数
+    struct aeTimeEvent *prev;             // 前一个时间事件
+    struct aeTimeEvent *next;             // 后一个时间事件
 } aeTimeEvent;
 
-/* A fired event */
+// 触发事件对象
 typedef struct aeFiredEvent {
-    int fd;
-    int mask;
+    int fd;                               // 事件 fd 编号
+    int mask;                             // 事件属性
 } aeFiredEvent;
 
 // 事件循环，处理接收到的请求
 typedef struct aeEventLoop {
-    int maxfd;                      // 已经注册的最大文件描述符
+    int maxfd;                      // 已经注册的事件最大文件描述符
     int setsize;                    // 跟踪的文件描述符数量
     long long timeEventNextId;      // 下一个时间时间 id
     time_t lastTime;                // 检查系统事件偏差
     aeFileEvent *events;            // 注册文件事件
     aeFiredEvent *fired;            // 触发事件
-    aeTimeEvent *timeEventHead;     // 事件事件
+    aeTimeEvent *timeEventHead;     // 时间事件
     int stop;                       // 停止标志位
     void *apidata;                  // 轮训 API 使用
-    aeBeforeSleepProc *beforesleep;
-    aeBeforeSleepProc *aftersleep;
+    aeBeforeSleepProc *beforesleep; // 休眠前钩子方法
+    aeBeforeSleepProc *aftersleep;  // 休眠结束钩子方法
 } aeEventLoop;
 
 /* Prototypes */

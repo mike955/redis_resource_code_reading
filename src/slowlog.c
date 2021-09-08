@@ -42,9 +42,7 @@
 #include "server.h"
 #include "slowlog.h"
 
-/* Create a new slowlog entry.
- * Incrementing the ref count of all the objects retained is up to
- * this function. */
+// 创建慢日志实体
 slowlogEntry *slowlogCreateEntry(client *c, robj **argv, int argc, long long duration) {
     slowlogEntry *se = zmalloc(sizeof(*se));
     int j, slargc = argc;
@@ -93,10 +91,7 @@ slowlogEntry *slowlogCreateEntry(client *c, robj **argv, int argc, long long dur
     return se;
 }
 
-/* Free a slow log entry. The argument is void so that the prototype of this
- * function matches the one of the 'free' method of adlist.c.
- *
- * This function will take care to release all the retained object. */
+// 释放慢日志空间
 void slowlogFreeEntry(void *septr) {
     slowlogEntry *se = septr;
     int j;
@@ -109,36 +104,31 @@ void slowlogFreeEntry(void *septr) {
     zfree(se);
 }
 
-/* Initialize the slow log. This function should be called a single time
- * at server startup. */
+// 慢日志工作初始化
 void slowlogInit(void) {
-    server.slowlog = listCreate();
-    server.slowlog_entry_id = 0;
-    listSetFreeMethod(server.slowlog,slowlogFreeEntry);
+    server.slowlog = listCreate();                          // 创建一个空的列表存储慢日志
+    server.slowlog_entry_id = 0;                            // 慢日志当前存储进度
+    listSetFreeMethod(server.slowlog,slowlogFreeEntry);     // 设置慢日志空间释放函数为 slowlogFreeEntry
 }
 
-/* Push a new entry into the slow log.
- * This function will make sure to trim the slow log accordingly to the
- * configured max length. */
+// 添加慢日志到记录列表
 void slowlogPushEntryIfNeeded(client *c, robj **argv, int argc, long long duration) {
-    if (server.slowlog_log_slower_than < 0) return; /* Slowlog disabled */
-    if (duration >= server.slowlog_log_slower_than)
-        listAddNodeHead(server.slowlog,
+    if (server.slowlog_log_slower_than < 0) return;     // 慢日志时间阀值小于 0, 不开启慢日志
+    if (duration >= server.slowlog_log_slower_than)     // 查询执行时间大于阀值，记录慢日志
+        listAddNodeHead(server.slowlog,                 // 慢查询记录末尾添加一条慢查询日志
                         slowlogCreateEntry(c,argv,argc,duration));
 
-    /* Remove old entries if needed. */
-    while (listLength(server.slowlog) > server.slowlog_max_len)
+    while (listLength(server.slowlog) > server.slowlog_max_len) // 如果慢日志条数超过设置阀值，丢弃最前面一条
         listDelNode(server.slowlog,listLast(server.slowlog));
 }
 
-/* Remove all the entries from the current slow log. */
+// 清空慢日志记录列表
 void slowlogReset(void) {
     while (listLength(server.slowlog) > 0)
         listDelNode(server.slowlog,listLast(server.slowlog));
 }
 
-/* The SLOWLOG command. Implements all the subcommands needed to handle the
- * Redis slow log. */
+// 慢日志命令执行方法
 void slowlogCommand(client *c) {
     if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"help")) {
         const char *help[] = {

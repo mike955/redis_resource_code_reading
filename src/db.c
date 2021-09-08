@@ -53,9 +53,9 @@ void updateLFU(robj *val) {
  * implementations that should instead rely on lookupKeyRead(),
  * lookupKeyWrite() and lookupKeyReadWithFlags(). */
 robj *lookupKey(redisDb *db, robj *key, int flags) {
-    dictEntry *de = dictFind(db->dict,key->ptr);
+    dictEntry *de = dictFind(db->dict,key->ptr);    // 根据 key 在字典中查找对应的值实体
     if (de) {
-        robj *val = dictGetVal(de);
+        robj *val = dictGetVal(de);                 // 根据值实体获取值对象
 
         /* Update the access time for the ageing algorithm.
          * Don't do it if we have a saving child, as this will trigger
