@@ -47,8 +47,8 @@
 // dictEntry 表示 redis 中每个键值对实体
 typedef struct dictEntry {
     void *key;          // 键
-    union {             // 值
-        void *val;      // val 值可以为任意类型，实际上为 redisObject 类型
+    union {             // 值，可以为 uint64_t、int64_t、 double，或者 val
+        void *val;      // val 值，实际上为 redisObject 类型
         uint64_t u64;
         int64_t s64;
         double d;
@@ -57,27 +57,27 @@ typedef struct dictEntry {
 } dictEntry;
 
 typedef struct dictType {
-    uint64_t (*hashFunction)(const void *key);
-    void *(*keyDup)(void *privdata, const void *key);
-    void *(*valDup)(void *privdata, const void *obj);
-    int (*keyCompare)(void *privdata, const void *key1, const void *key2);
-    void (*keyDestructor)(void *privdata, void *key);
-    void (*valDestructor)(void *privdata, void *obj);
+    uint64_t (*hashFunction)(const void *key);                              // 计算 key 的哈希值函数
+    void *(*keyDup)(void *privdata, const void *key);                       // 复制 key 的函数
+    void *(*valDup)(void *privdata, const void *obj);                       // 复制 value 的函数
+    int (*keyCompare)(void *privdata, const void *key1, const void *key2);  // key 比较函数
+    void (*keyDestructor)(void *privdata, void *key);                       // 销毁 key 的函数
+    void (*valDestructor)(void *privdata, void *obj);                       // 销毁 value 的函数
 } dictType;
 
 // 哈希表结构，每一个字段有两个该实例，在 rehash 的时候用于拷贝
 typedef struct dictht {
-    dictEntry **table;        // 二级指针
-    unsigned long size;       // 当前字段大小
-    unsigned long sizemask;   // 哈希表大小掩码，等于 size-1
+    dictEntry **table;        // 二级指针，哈希表数组，数组中的每个元素元素都是一个指向 dictEntry 的指针
+    unsigned long size;       // 当前哈希表大小
+    unsigned long sizemask;   // 哈希表大小掩码，等于 size-1，计算键索引时用到
     unsigned long used;       // 当前字典中存储的 key 数量
 } dictht;
 
 typedef struct dict {
     dictType *type;           // 一组操作特定 key 的函数
     void *privdata;           // 私有数据，保存传递给 type 特定函数的参数
-    dictht ht[2];             // 两个字典实例，在进行 rehash 的时候用于拷贝
-    long rehashidx;           // 是否进行 rehash，-1 表示不进行
+    dictht ht[2];             // 两个哈希表，在进行 rehash 的时候用于拷贝
+    long rehashidx;           // 是否在进行 rehash，-1 表示未在进行
     unsigned long iterators;   // 当前运行的迭代器数量
 } dict;
 

@@ -33,6 +33,29 @@
 #include "adlist.h"
 #include "zmalloc.h"
 
+/*
+  链表相关 API
+    -
+    - listCreae:
+    - listEmpty:
+    - listRelease:
+    - listAddNodeHead:
+    - listAddNodeTail:
+    - listInsertNode:
+    - listDelNode:
+    - listGetIterator:
+    - listNext:
+    - listReleaseIterator:
+    - listDup:
+    - listSearchKey:
+    - listIndex:
+    - listRewind:
+    - listRewindTail:
+    - listRotateTailToHead:
+    - listRotateHeadToTail:
+    - listJoin
+*/
+
 /* Create a new list. The created list can be freed with
  * AlFreeList(), but private value of every node need to be freed
  * by the user before to call AlFreeList().

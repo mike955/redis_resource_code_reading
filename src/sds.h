@@ -42,17 +42,26 @@ extern const char *SDS_NOINIT;
 
 typedef char *sds;
 
-/* Note: sdshdr5 is never used, we just access the flags byte directly.
- * However is here to document the layout of type 5 SDS strings. */
+/*
+  1.sds 时 redis 定义的一种动态字符串数据结构，包含字符串长度属性，带来的好处有：
+    - 获取字符串长度时不再需要计算(c 语言获取字符串长度需要遍历字符串，直到遇到 \0 符号，复杂的为 O(n))，
+    - 进行字符串拷贝时，直接使用 alloc 与 len 的差值，就知道空间是否足够，不够直接扩展，减少溢出概率
+    - sds 通常会预分配比自身多的内存，使得字符串操作时减少内存分配操作，加快操作速率，带来的影响是提高了内存的使用
+  2.同时 sds 不再使用 \0 来作为字符串终止符，使得 sds 成为一种安全类型，redis 定义了五种 sds 类型，
+  分别为 sdshdr5(不再被使用)、sdshdr8、sdshdr16、sdshdr32、sdshdr64，根据字符串大小选择合适的类型使用，节省空间
+  3.redis 将字符串以二进制形式，而非字符形式存储，使得 sds 不仅可以存储文本数据，还可以存储二进制数据
+  4.sds 结构体定义时通过`__attribute__ ((__packed__))`告诉编译器取消对结构体在编译过程中的对齐，节省空间
+*/
+
 struct __attribute__ ((__packed__)) sdshdr5 {
-    unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
+    unsigned char flags;    // 低 3 位存放类型，高 5 位存放
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr8 {
-    uint8_t len; /* used */
-    uint8_t alloc; /* excluding the header and null terminator */
-    unsigned char flags; /* 3 lsb of type, 5 unused bits */
-    char buf[];
+    uint8_t len;            // 字节数组长度，字符串长度，不包含空终止符\0
+    uint8_t alloc;          // 分配的内存大小，不包头终止符和空终止符\0
+    unsigned char flags;    // 字节数组属性，只使用了低 3 位
+    char buf[];             // 字节数组，存储字符串数据，空终止符\0 会作为一个单独的字符串存储，这样可以直接重用一部分 c 字符串库函数
 };
 struct __attribute__ ((__packed__)) sdshdr16 {
     uint16_t len; /* used */
@@ -73,6 +82,7 @@ struct __attribute__ ((__packed__)) sdshdr64 {
     char buf[];
 };
 
+// 字符串类型，sds 定义中的 flags 字段使用
 #define SDS_TYPE_5  0
 #define SDS_TYPE_8  1
 #define SDS_TYPE_16 2
@@ -84,6 +94,7 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
+// 获取 sds 中字符串长度
 static inline size_t sdslen(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -101,6 +112,7 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+// 获取 sds 剩余可用空间
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -151,6 +163,7 @@ static inline void sdssetlen(sds s, size_t newlen) {
     }
 }
 
+// 增加 sds 使用空间
 static inline void sdsinclen(sds s, size_t inc) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -176,7 +189,7 @@ static inline void sdsinclen(sds s, size_t inc) {
     }
 }
 
-/* sdsalloc() = sdsavail() + sdslen() */
+// 返回 sds 分配的空间
 static inline size_t sdsalloc(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -194,6 +207,7 @@ static inline size_t sdsalloc(const sds s) {
     return 0;
 }
 
+// 更新 sds 分配空间
 static inline void sdssetalloc(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {

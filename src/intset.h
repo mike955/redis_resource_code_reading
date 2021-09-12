@@ -32,10 +32,11 @@
 #define __INTSET_H
 #include <stdint.h>
 
+// 整数集合
 typedef struct intset {
-    uint32_t encoding;
-    uint32_t length;
-    int8_t contents[];
+    uint32_t encoding;  // 编码方式，有三种 int16、int32、int64,
+    uint32_t length;    // 长度
+    int8_t contents[];  // 集合中元素，值按大小排序，不包含重复元素
 } intset;
 
 intset *intsetNew(void);

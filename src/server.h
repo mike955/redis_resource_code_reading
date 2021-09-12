@@ -598,7 +598,7 @@ typedef struct RedisModuleDigest {
 #define OBJ_ENCODING_INT 1          // 整数
 #define OBJ_ENCODING_HT 2           // 哈希表
 #define OBJ_ENCODING_ZIPMAP 3       // 压缩哈希表
-#define OBJ_ENCODING_LINKEDLIST 4   // 不再被使用
+#define OBJ_ENCODING_LINKEDLIST 4   // 双端链表，不再被使用
 #define OBJ_ENCODING_ZIPLIST 5      // 压缩列表
 #define OBJ_ENCODING_INTSET 6       // 整数集合
 #define OBJ_ENCODING_SKIPLIST 7     // 跳表
