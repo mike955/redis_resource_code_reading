@@ -20,10 +20,18 @@
     - [AOF](#aof)
     - [RDB](#rdb)
   - [内存管理](#内存管理)
+    - [内存分配](#内存分配)
+    - [内存回收](#内存回收)
+    - [碎片整理](#碎片整理)
+    - [内存淘汰(置换)策略](#内存淘汰置换策略)
   - [高可用](#高可用)
-    - [sentinal](#sentinal)
+    - [replicate](#replicate)
+    - [sentinel](#sentinel)
     - [cluster](#cluster)
   - [事件模型](#事件模型)
+    - [事件循环初始化](#事件循环初始化)
+    - [添加事件](#添加事件)
+    - [执行事件](#执行事件)
   - [慢查询日志](#慢查询日志)
   - [rehash操作](#rehash操作)
 ## 数据类型
@@ -47,6 +55,7 @@ typedef struct redisObject {
 #### list
 
 列表，按顺序存储放入的数据，实例上是链表。底层使用链表或压缩列表实现。
+
 #### hash
 
 #### set
@@ -205,16 +214,204 @@ redis 初始化时会初始化 aof_buf 变量为空的动态字符串，用户�
 
 ### RDB
 
+rdb 持久化与 aof 不同地方在于，aof 记录的是指令，rdb 记录的是数据，aof 根据时间刷盘，dbs 根据操作频率刷盘。
+
+dbs 既可以手动执行也可以根据配置自动执行，手动执行 rdb 持久化的命令为`save`和`bgsave`，rdb 持久化生产的是一个经过压缩的二进制文件，redis 启动时可以根据该文件初始化数据。
+
+redis 将 rdb 持久化参数保存在`saveparams`参数中，`saveparams`包含两个参数，一个记录时间，一个记录修改次数。redis 默认会使用`appendServerSaveParams`添加三个 rdb 参数，分别为 1 小时至少 1 次修改、5 分钟至少 100 次修改、1 分钟至少 1000 次修改。只要这三个参数满足一个，redis 就会生成 rdb 持久化文件。
+
+在 redis 定义任务事件方法中，我们发现了针对 rdb 持久化的相关逻辑。首先通过`saveparamslen`检查 rdb 自动持久化参数是否为空，如果不为空检查当前服务的上次持久化到现在的修改次数`dirty`和时间`unixtime`是否大于设置的 rdb 参数，如果符合条件，调用`rdbSaveBackground`开始 rdb 持久化，自动持化话会在后台进行，不阻塞当前事件循环。
+
+对于手动持计划命令`save`和`bgsave`，通过查看对应的执行函数`saveCommand`和`bgsaveCommand`可以发现，`save`是一个阻塞操作；`bgsave`是一个非阻塞操作。
+
+无论是非阻塞操作还是阻塞操作，最后都是调用`/src/rdb.c`文件中的`rdbSave`方法，该方法会先创建一个文件，然后调用`rdbSaveRio`准备数据，进入写数据，最后重置`dirty`参数为 0.`rdbSaveRio`函数详细描述了写入到 rdb 文件的数据，首先写入 "REDIS" 字符，然后写入当前 rdb 版本号，然后再写入数据，最后写入 crc64 校验和。
+
+自动 rdb 持久化和`bgsave`主动持久化都是一个异步操作，不会阻塞当前事件循环，这两个操作最后都是调用`rdbSaveBackgroud`函数来进行一步持久化。持久化的主要流程为：
+
+    - 调用`fork`函数创建一个子进程
+    - 在子进程中调用`rdbSave`来生成 rdb 文件，由于创建的子进程在 fork 时享有和父进程完全相同的内存数据
+    - 父进程记录相关数据后返回，不阻塞子进程
+
+由于 fork 操作创建的子进程享有和父进程完全相同的内存数据，因此子进程持久化使用到的数据就是父进程内存中需要持久化的数据，不用重新拷贝一份数据，节省了空间。父子进程的虚拟内存指向的是同一片物理内存，当夫进程内存数据被修改时，操作系统会为修改的页重新拷贝一份供子进程使用，父进程继续使用老的物理页。这就是**copy-on-write**，写时复制。
+
 ## 内存管理
 
-基于引用计数的内存回收方式
+redis 是一个内存密集型服务，对内存的需求很对，在某些地方使用了空间换时间的方式(如为字符串分配大于其自身的内存)也加大了其对内存的需求。redis 提供了相关参数来对使用内存进行设置。这里我们主要讨论四个方面：内存分配、内存回收、碎片整理、内存淘汰策略
+
+### 内存分配
+
+redis 没有自己实现内存池，因此选用了第三方库来进行内存分配工作，redis 支持三种 tcmalloc、 jemalloc 、libc 三种内存分配器，具体的内存使用方式根据宏定义来决定。其中 jemalloc 被包含在在源码中(/deps/jemalloc)，libc 是库函数。使用 tcmalloc 需要自行下载安装。
+
+### 内存回收
+
+redis 使用引用计算的方式来进行内存回收，redis 在每个对象结构体中定义了一个字段`refcount`，用来记录该对象是否被使用，当该对象的值为 0 时，表示该对象不会再被使用，内存可以被回收。
+
+对于设置了过期时间的 key，redis 会使用**惰性检查**和**主动检查**两种方式来判断是否过期：
+    - 惰性删除：每次获取 key 时，会检查是否已过期
+    - 定期删除：在时间任务中执行，默认的策略为缓慢删除(ACTIVE_EXPIRE_CYCLE_SLOW)，该策略会遍历数据库(默认为 16，CRON_DBS_PER_CALL)，遍历设置了过期时间的key，迭代步数为16(iteration & 0xf)，这样可以缩短遍历时间，减少阻塞时间，如果抽样的 key 中有 25% 的key 达到过期时间，会则继续下次抽样，否则结束定时删除过期key，下个周期在进行。
+
+### 碎片整理
+
+redis 提供了碎片整理的相关参数，主要有：
+    - activedefrag: 是否开启碎片整理，默认不开启
+    - active-defrag-ignore-bytes: 碎片大小超过多少开始整理，默认为 100MB
+    - active-defrag-threshold-lower: 碎片率超过多少开始整理，默认 10%
+    - active-defrag-threshold-upper: 最大碎片百分比，默认 100%
+    - active-defrag-cycle-min: 碎片整理使用最小 cpu 百分比，默认为 5% 
+    - active-defrag-cycle-max: 碎片整理使用最大 cpu 百分比，默认为 75%
+    - active-defrag-max-scan-fields: 碎片处理最大扫描 key 数量
+
+碎片整理在定时事件中执行，会阻塞事件循环，函数为`activeDefragCycle`，该函数会每次运行 1 秒钟，然后检查是否满足碎片整理条件。
+
+### 内存淘汰(置换)策略
+
+当 reids 使用的内存到达最大设定值后，如果还需要内存来继续存放数据，会根据设定的淘汰策略来删除相关 key，目前有 6 种淘汰策略：
+    - volatile-lru: 在设置了过期时间的 key 中使用 lru 算法进行淘汰
+    - allkeys-lru: 在所有 key 中使用 lru 算法进行淘汰
+    - volatile-lfu: 在设置了过期时间的 key 中使用 lfu 算法进行淘汰
+    - allkeys-lfu: 在所有 key 中使用 lfu 算法进行淘汰
+    - volatile-random: 从设置了过期时间的 key 中随机选择一个进行淘汰
+    - allkeys-random: 从所有的 key 中随机选择一个 key 进行淘汰
+    - volatile-ttl: 在设置了过期时间 key 的中选择过期时间最早的进行淘汰
+    - noeviction: 不淘汰，对于写请求，直接返回错误
+
+redis 中的 lru (Least Recently Used) 算法不是一种精确的 lru 算法，因为精确的 lru 算法需要使用到更多的内存，lru 淘汰的逻辑为：在集合中选择最近访问次数最少的 key 进行淘汰。
+
+lfu (Least Frequently Used) 是 redis4.0 引入的一种新的内存淘汰策略，这种算法为了应对一种 lru 不太适应的情况：访问频率不高，但最近被访问过。lfu 淘汰的逻辑为：最近最长使用，redis 会维护一个激素及，记录当前 key 访问次数与时间的关系，判断随着之间的推移，key 的访问频率。
+
+redis 在执行命令对应的函数时，会检查内存是否超出，如果超出，会调用`freeMemoryIfNeededAndSafe`方法进行判断，如果满足淘汰策略，会调用相关函数淘汰 key。
+
 ## 高可用
 
-### sentinal
+redis 提供里三种多机方案，分别为replicate、senetinel、cluster。其中有两种可以作为高可用方案，一种是 Sentinel，一种是 Cluster.
+
+### replicate
+
+复制是 redis 提供的一种基本多机方案，一个 redis 实例(从节点)可以复制另一个 redis 实例(主节点)的数据，作为其从节点，当主节点宕机时，使用从节点提供服务。这样方案需要手动切换。
+
+在从节点上执行 `lavof masterHost masterPort`命令后，从节点将主节点信息存储到相应字段，同时连接到主服务器，在主服务器看来，从服务器实际上是一个客户端，从服务器向主服务器发送指令，接收返回的数据。
+
+集群模式(cluster)不支持复制。
+
+### sentinel
 
 ### cluster
 
 ## 事件模型
+
+redis 的事件驱动模型是其高性能的关键。redis 会在初始化时创建一个事件循环，事件循环中包含已经被初始化的事件，服务启动后，就是轮训事件循环，直到退出。在`/src/server.c`文件的`main`函数中，redis 进行相关初始化工作后会调用`aeMain`方法来执行事件循环，处理事件任务。
+
+### 事件循环初始化
+
+redis 事件的初始化在`/src/server.c`文件的`initServer`函数中完成，事件初始化代码如下：
+
+```c
+server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR); // 设置时间循环大小，默认为 客户端最大连接数+128
+
+...
+
+aeEventLoop *aeCreateEventLoop(int setsize) {
+    aeEventLoop *eventLoop;
+    int i;
+
+    if ((eventLoop = zmalloc(sizeof(*eventLoop))) == NULL) goto err;
+    eventLoop->events = zmalloc(sizeof(aeFileEvent)*setsize);
+    eventLoop->fired = zmalloc(sizeof(aeFiredEvent)*setsize);
+    if (eventLoop->events == NULL || eventLoop->fired == NULL) goto err;
+    eventLoop->setsize = setsize;
+    eventLoop->lastTime = time(NULL);
+    eventLoop->timeEventHead = NULL;
+    eventLoop->timeEventNextId = 0;
+    eventLoop->stop = 0;
+    eventLoop->maxfd = -1;
+    eventLoop->beforesleep = NULL;
+    eventLoop->aftersleep = NULL;
+    if (aeApiCreate(eventLoop) == -1) goto err;
+    /* Events with mask == AE_NONE are not set. So let's initialize the
+     * vector with it. */
+    for (i = 0; i < setsize; i++)
+        eventLoop->events[i].mask = AE_NONE;    // 初始化事件循环为空
+    return eventLoop;
+
+err:
+    if (eventLoop) {
+        zfree(eventLoop->events);
+        zfree(eventLoop->fired);
+        zfree(eventLoop);
+    }
+    return NULL;
+}
+```
+
+根据事件初始化代码发现，redis 在初始化时会先创建事件，数目为 配置的最大客户端连接数+128，之所以是 128 是因为 redis 自身保留使用 32 个事件，另外 96 个事件为 buffer，确保事件数量够使用。事件数量会在服务启动前被确定，服务启动后不会再修改。
+
+redis 调用`aeApiCreate`初始化事件循环，分析代码会发现，`aeApiCreate` 实际上是创建了一个**多路复用**，具体的多路复用根据 redis 编译的环境不同而不同，redis 封装了 evport、epoll、kqueue、select 四种多路复用模型，在`/src/ae.c`文件中会根据宏定义来决定使用哪种多路复用模型。redis 将四种多路复用模型使用相同的函数名进行封装，通过在事件循环结构体的`apidate`中填入不同的参数来供不同的模型使用。可以说封装的非常巧妙。
+
+### 添加事件
+
+redis 初始化事件循环后，事件循环中的所有事件为空，需要添加有效事件。同样是在`/src/server.c`文件的`initServer`函数中，redis 创建相关有效事件,主要代码如下:
+
+```c
+// 创建时间事件，用于在后台处理一下相关工作，如客户端操作、过期 key、碎片整理 等工作
+if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {            
+    serverPanic("Can't create event loop timers.");
+    exit(1);
+}
+
+...
+
+for (j = 0; j < server.ipfd_count; j++) {
+        if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE,
+            acceptTcpHandler,NULL) == AE_ERR)
+            {
+                serverPanic(
+                    "Unrecoverable error creating server.ipfd file event.");
+            }
+    }
+if (server.sofd > 0 && aeCreateFileEvent(server.el,server.sofd,AE_READABLE,
+    acceptUnixHandler,NULL) == AE_ERR) serverPanic("Unrecoverable error creating server.sofd file event.");
+
+// 创建一个可读的文件事件，在一个客户端阻塞时
+if (aeCreateFileEvent(server.el, server.module_blocked_pipe[0], AE_READABLE,
+    moduleBlockedClientPipeReadable,NULL) == AE_ERR) {
+        serverPanic(
+            "Error registering the readable event for the module "
+            "blocked clients subsystem.");
+
+aeSetBeforeSleepProc(server.el,beforeSleep);
+aeSetAfterSleepProc(server.el,afterSleep);
+}
+```
+
+通过创建事件的代码可以发现，在 redis 中存在两类事件：**时间事件和文件事件**。
+
+时间事件其实是一个定时任务事件，定时执行相关操作，如果过期 key 检查、碎片整理等任务，具体的定期任务可以通过其注册的时间事件函数`serverCron`来发现。
+
+文件事件更多的像是一个网络 I/O 事件处理器。以 TCP 启动方式为例，针对每一个 tcpfd，redis 会调用`aeCreateFileEvent` 创建一个文件事件，其处理函数为`acceptTcpHandler`, `aeCreateFileEvent`方法会调用`aeApiAddEvent`将事件放入多路复用，当有事件触发时，调用对应的函数进行处理。
+
+`acceptTcpHandler`最后会调用`acceptCommonHandler`对接收到的 tcp 连接进行处理，调用`createClient`创建客户端对象，如果创建成功，会在事件循环中添加一个该客户端的可读性事件`readQueryFromClient`，即当该 tcp 接收到数据时，调用`readQueryFromClient`方法处理接收到的数据。
+
+当需要响应客户端请求时，会向事件循环注册一个写事件，处理函数为`sendReplyToClient`，该函数会将需要返回给客户端的数据返回给客户端。
+
+redis 还在事件循环中注册了两个钩子事件，分别为`beforeSleep`和`afterSleep`，beforeSleep 用于在每次进入事件前调用，afterSleep 用于在多路复用事件执行后调用。
+
+### 执行事件
+
+在初始化事件完成后，redis 会在`main`函数最后调用`aeMain`函数，用于处理事件循环，`aeMain`函数代码如下：
+
+```c
+void aeMain(aeEventLoop *eventLoop) {
+    eventLoop->stop = 0;
+    while (!eventLoop->stop) {
+        if (eventLoop->beforesleep != NULL)
+            eventLoop->beforesleep(eventLoop);
+        aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP);
+    }
+}
+```
+
+`aeMain`会不断执行事件循环，每次调用时会判断`beforesleep`方法是否为空，如果是会先执行该事件，然后调用`aeProcessEvents`执行事件。
+
 ## 慢查询日志
 
 redis 的慢查询日志使用列表(实际上是链表)数据结构存储日志，与慢查询相关的参数有两个：
